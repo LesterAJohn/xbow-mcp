@@ -1,0 +1,18 @@
+{
+  "name": "xbow-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for the XBOW API.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test",
+    "test:watch": "node --test --watch"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0"
+  }
+}
