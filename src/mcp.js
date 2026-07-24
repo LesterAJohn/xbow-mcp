@@ -49,6 +49,15 @@ function ensureAuthorized(client, input, toolName) {
   }
 }
 
+function ensureMutationAuthorization(client, input, toolName, method) {
+  const normalizedMethod = typeof method === "string" ? method.toUpperCase() : "GET";
+  const mutatingMethods = new Set(["POST", "PATCH", "PUT", "DELETE"]);
+
+  if (mutatingMethods.has(normalizedMethod)) {
+    ensureAuthorized(client, input, toolName);
+  }
+}
+
 export const toolDefinitions = [
   tool(
     "xbow_set_default_api_token",
@@ -352,23 +361,27 @@ export async function invokeTool(client, name, input = {}) {
 
   switch (name) {
     case "xbow_set_default_api_token": {
+      ensureAuthorized(client, input, "xbow_set_default_api_token");
       const apiToken = ensureString(input.apiToken, "apiToken");
       const value = await client.setDefaultApiToken(apiToken);
       return jsonContent({ ok: true, apiToken: value });
     }
     case "xbow_set_user_api_token": {
+      ensureAuthorized(client, input, "xbow_set_user_api_token");
       const userId = ensureString(input.userId, "userId");
       const apiToken = ensureString(input.apiToken, "apiToken");
       const value = await client.setUserApiToken(userId, apiToken);
       return jsonContent({ ok: true, userId, apiToken: value });
     }
     case "xbow_clear_user_api_token": {
+      ensureAuthorized(client, input, "xbow_clear_user_api_token");
       const userId = ensureString(input.userId, "userId");
       client.clearUserApiToken(userId);
       return jsonContent({ ok: true, userId });
     }
     case "xbow_request": {
       const method = ensureString(input.method, "method");
+      ensureMutationAuthorization(client, input, "xbow_request", method);
       const path = ensureString(input.path, "path");
       const payload = await client.request(path, {
         ...requestOptions,

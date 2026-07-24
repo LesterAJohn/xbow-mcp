@@ -30,6 +30,7 @@ The current tool set focuses on the most useful XBOW flows:
 - `XBOW_API_TOKEN`: default API token used as `Authorization: Bearer ...` when no per-request token is supplied.
 - `XBOW_API_BASE_URL`: defaults to `https://console.xbow.com/api/v1`.
 - `XBOW_API_VERSION`: defaults to `2026-07-01`.
+- `XBOW_ADMIN_AUTH_KEY`: optional admin authorization key. When configured, mutating tools require an `authorizationKey` argument.
 
 ## Multi-user support
 
@@ -67,6 +68,26 @@ Examples:
   "method": "GET",
   "path": "/meta/addresses",
   "userId": "alice"
+}
+```
+
+## Authorization for mutating tools
+
+The MCP server follows the same pattern as the skeleton MCP template:
+
+- read-only tools remain available without extra authorization.
+- mutating tools such as token updates, finding workflow updates, webhook updates/deletes, and generic `xbow_request` calls with `POST`, `PATCH`, `PUT`, or `DELETE` require an `authorizationKey` when `XBOW_ADMIN_AUTH_KEY` is configured.
+
+Example:
+
+```json
+{
+  "name": "xbow_update_finding_workflow",
+  "arguments": {
+    "findingId": "finding-1",
+    "externalWorkflowState": "triaged",
+    "authorizationKey": "super-secret-key"
+  }
 }
 ```
 
@@ -126,3 +147,4 @@ The tests validate:
 - Retry behavior for `429 Too Many Requests`.
 - The finding workflow update path for `PATCH /api/v1/findings/{findingId}`.
 - The XBOW-specific tool catalog.
+- Authorization enforcement for mutating tools and generic mutating request methods.

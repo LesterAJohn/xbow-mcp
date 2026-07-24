@@ -104,3 +104,52 @@ test("mutating tools require the configured admin authorization key", async () =
     /authorizationKey/,
   );
 });
+
+test("token-management tools are treated as mutating operations", async () => {
+  const client = createXbowClient({
+    apiToken: "default-token",
+    adminAuthKey: "test-key",
+    fetchImpl: async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+    sleep: async () => {},
+  });
+
+  await assert.rejects(
+    () => invokeTool(client, "xbow_set_default_api_token", {
+      apiToken: "new-token",
+      authorizationKey: "",
+    }),
+    /authorizationKey/,
+  );
+
+  await assert.rejects(
+    () => invokeTool(client, "xbow_clear_user_api_token", {
+      userId: "alice",
+      authorizationKey: "",
+    }),
+    /authorizationKey/,
+  );
+});
+
+test("generic request tools require authorization for mutating methods", async () => {
+  const client = createXbowClient({
+    apiToken: "default-token",
+    adminAuthKey: "test-key",
+    fetchImpl: async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+    sleep: async () => {},
+  });
+
+  await assert.rejects(
+    () => invokeTool(client, "xbow_request", {
+      method: "PATCH",
+      path: "/findings/finding-1",
+      authorizationKey: "",
+    }),
+    /authorizationKey/,
+  );
+});
