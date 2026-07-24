@@ -97,6 +97,8 @@ export function createXbowClient({
   retryAttempts = 3,
   retryDelayMs = 250,
   sleep = defaultSleep,
+  tokenStore,
+  adminAuthKey,
 } = {}) {
   if (!apiToken) {
     throw new Error("XBOW_API_TOKEN is required");
@@ -106,12 +108,65 @@ export function createXbowClient({
     throw new Error("A fetch implementation is required");
   }
 
+  let defaultApiToken = apiToken;
+  const userApiTokens = new Map();
+
+  async function persistToken(kind, userId, tokenValue) {
+    if (!tokenStore || tokenStore.type !== "vault") {
+      return;
+    }
+
+    const vaultClient = tokenStore.vaultClient;
+    if (!vaultClient || typeof vaultClient.writeSecret !== "function") {
+      return;
+    }
+
+    const appName = tokenStore.appName ?? "xbow";
+    const effectiveUserId = userId ?? tokenStore.userId ?? "default";
+    const path = kind === "user"
+      ? `${appName}/users/${effectiveUserId}/${appName}/token`
+      : `${appName}/default/${appName}/token`;
+
+    await vaultClient.writeSecret(path, { token: tokenValue, userId: effectiveUserId, appName });
+  }
+
+  async function setDefaultApiToken(nextApiToken) {
+    if (typeof nextApiToken !== "string" || nextApiToken.trim() === "") {
+      throw new Error("apiToken must be a non-empty string");
+    }
+    defaultApiToken = nextApiToken.trim();
+    await persistToken("default", undefined, defaultApiToken);
+    return defaultApiToken;
+  }
+
+  async function setUserApiToken(userId, nextApiToken) {
+    if (typeof userId !== "string" || userId.trim() === "") {
+      throw new Error("userId must be a non-empty string");
+    }
+    if (typeof nextApiToken !== "string" || nextApiToken.trim() === "") {
+      throw new Error("apiToken must be a non-empty string");
+    }
+    const normalizedToken = nextApiToken.trim();
+    userApiTokens.set(userId.trim(), normalizedToken);
+    await persistToken("user", userId.trim(), normalizedToken);
+    return normalizedToken;
+  }
+
+  function clearUserApiToken(userId) {
+    if (typeof userId !== "string" || userId.trim() === "") {
+      throw new Error("userId must be a non-empty string");
+    }
+    userApiTokens.delete(userId.trim());
+  }
+
   async function request(path, options = {}) {
     const {
       method = "GET",
       query = {},
       body,
       headers = {},
+      apiToken: requestApiToken,
+      userId,
     } = options;
 
     const url = buildUrl(baseUrl, path, query);
@@ -119,7 +174,11 @@ export function createXbowClient({
 
     while (true) {
       const requestHeaders = new Headers(headers);
-      requestHeaders.set("Authorization", `Bearer ${apiToken}`);
+      const effectiveApiToken = requestApiToken ?? (userId ? userApiTokens.get(userId) : undefined) ?? defaultApiToken;
+      if (!effectiveApiToken) {
+        throw new Error("XBOW_API_TOKEN is required");
+      }
+      requestHeaders.set("Authorization", `Bearer ${effectiveApiToken}`);
       requestHeaders.set("X-XBOW-API-Version", apiVersion);
 
       const serializedBody = serializeBody(body);
@@ -159,6 +218,10 @@ export function createXbowClient({
 
   return {
     request,
+    setDefaultApiToken,
+    setUserApiToken,
+    clearUserApiToken,
+    adminAuthKey,
   };
 }
 

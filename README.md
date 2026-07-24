@@ -27,9 +27,48 @@ The current tool set focuses on the most useful XBOW flows:
 
 ## Configuration
 
-- `XBOW_API_TOKEN`: required API token used as `Authorization: Bearer ...`.
+- `XBOW_API_TOKEN`: default API token used as `Authorization: Bearer ...` when no per-request token is supplied.
 - `XBOW_API_BASE_URL`: defaults to `https://console.xbow.com/api/v1`.
 - `XBOW_API_VERSION`: defaults to `2026-07-01`.
+
+## Multi-user support
+
+The server now exposes explicit runtime tools for credential management:
+
+- `xbow_set_default_api_token` updates the default token used for requests that do not specify a user-specific override.
+- `xbow_set_user_api_token` stores a token for a specific `userId`.
+- `xbow_clear_user_api_token` removes a stored per-user token.
+
+Each tool call can optionally include an `apiToken` argument or a `userId` to select a stored token. When present, those values override the default `XBOW_API_TOKEN` for that single request, which allows a single MCP server instance to be used by multiple users or tenants with different credentials.
+
+Examples:
+
+```json
+{
+  "name": "xbow_set_default_api_token",
+  "arguments": {
+    "apiToken": "default-token"
+  }
+}
+```
+
+```json
+{
+  "name": "xbow_set_user_api_token",
+  "arguments": {
+    "userId": "alice",
+    "apiToken": "alice-token"
+  }
+}
+```
+
+```json
+{
+  "method": "GET",
+  "path": "/meta/addresses",
+  "userId": "alice"
+}
+```
 
 ## Example usage
 
@@ -49,6 +88,9 @@ The server is meant to run over stdio for MCP clients such as VS Code, Claude De
 
 ## Tool reference
 
+- `xbow_set_default_api_token`
+- `xbow_set_user_api_token`
+- `xbow_clear_user_api_token`
 - `xbow_request`
 - `xbow_get_meta_addresses`
 - `xbow_get_meta_openapi`
