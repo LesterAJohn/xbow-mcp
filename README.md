@@ -109,10 +109,21 @@ The server is meant to run over stdio for MCP clients such as VS Code, Claude De
 
 ## Tool reference
 
-- `xbow_set_default_api_token`
-- `xbow_set_user_api_token`
-- `xbow_clear_user_api_token`
-- `xbow_request`
+Each MCP tool definition now includes:
+
+- When the tool should and should not be used.
+- Operation risk class (`read-only`, `mutating`, or `high-risk`).
+- Permissions and prerequisites.
+- Environment/token-selection behavior.
+- Parameter formats and constraints (including shared fields like `apiToken`, `userId`, and `authorizationKey`).
+- Expected response shape.
+- Common failure conditions.
+- Recommended prerequisite and follow-up tools.
+- Safety warnings for destructive or sensitive operations.
+- A short valid invocation example.
+
+### Read-only tools
+
 - `xbow_get_meta_addresses`
 - `xbow_get_meta_openapi`
 - `xbow_get_meta_webhook_signing_keys`
@@ -120,7 +131,6 @@ The server is meant to run over stdio for MCP clients such as VS Code, Claude De
 - `xbow_get_asset`
 - `xbow_list_asset_findings`
 - `xbow_get_finding`
-- `xbow_update_finding_workflow`
 - `xbow_list_asset_assessments`
 - `xbow_get_assessment`
 - `xbow_list_asset_reports`
@@ -128,10 +138,21 @@ The server is meant to run over stdio for MCP clients such as VS Code, Claude De
 - `xbow_get_report_summary`
 - `xbow_list_organization_webhooks`
 - `xbow_get_webhook`
+- `xbow_list_webhook_deliveries`
+
+### Mutating tools
+
+- `xbow_set_default_api_token`
+- `xbow_set_user_api_token`
+- `xbow_clear_user_api_token`
+- `xbow_update_finding_workflow`
 - `xbow_update_webhook`
 - `xbow_delete_webhook`
 - `xbow_ping_webhook`
-- `xbow_list_webhook_deliveries`
+
+### High-risk tool
+
+- `xbow_request` (read or mutate depending on `method`; mutating methods require admin authorization when `XBOW_ADMIN_AUTH_KEY` is configured)
 
 ## Testing
 

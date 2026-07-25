@@ -1,6 +1,221 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
+const MUTATING_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
+
+function operationTypeForTool(name) {
+  if (name === "xbow_request") {
+    return "high-risk";
+  }
+
+  if (
+    name.startsWith("xbow_set_")
+    || name.startsWith("xbow_clear_")
+    || name.startsWith("xbow_update_")
+    || name.startsWith("xbow_delete_")
+    || name.startsWith("xbow_ping_")
+  ) {
+    return "mutating";
+  }
+
+  return "read-only";
+}
+
+function typeToText(schema) {
+  if (!schema || typeof schema !== "object") {
+    return "any";
+  }
+
+  if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
+    return schema.anyOf
+      .map((entry) => entry?.type ?? "any")
+      .join(" | ");
+  }
+
+  if (schema.type === "array") {
+    const itemType = schema.items?.type ?? "any";
+    return `${itemType}[]`;
+  }
+
+  return schema.type ?? "any";
+}
+
+function buildConstraintText(name, schema, requiredNames) {
+  const fragments = [];
+  fragments.push(requiredNames.includes(name) ? "required" : "optional");
+
+  const typeText = typeToText(schema);
+  fragments.push(`type=${typeText}`);
+
+  if (typeof schema?.minimum === "number") {
+    fragments.push(`min=${schema.minimum}`);
+  }
+
+  if (typeof schema?.maximum === "number") {
+    fragments.push(`max=${schema.maximum}`);
+  }
+
+  if (typeof schema?.description === "string" && schema.description.trim() !== "") {
+    fragments.push(schema.description.trim());
+  }
+
+  return `${name}: ${fragments.join("; ")}`;
+}
+
+function sampleValueForSchema(name, schema) {
+  const typeText = typeToText(schema);
+  if (typeText.includes("null") && typeText.includes("string")) {
+    return `${name}-value`;
+  }
+  if (typeText === "integer" || typeText === "number") {
+    return typeof schema?.minimum === "number" ? schema.minimum : 1;
+  }
+  if (typeText === "boolean") {
+    return true;
+  }
+  if (typeText === "object") {
+    return {};
+  }
+  if (typeText.endsWith("[]")) {
+    return [];
+  }
+  return `${name}-value`;
+}
+
+function buildExample(name, schema, operationType) {
+  const required = Array.isArray(schema?.required) ? schema.required : [];
+  const properties = schema?.properties ?? {};
+  const args = {};
+
+  for (const requiredName of required) {
+    args[requiredName] = sampleValueForSchema(requiredName, properties[requiredName]);
+  }
+
+  if (name === "xbow_request") {
+    args.method = "GET";
+    args.path = "/meta/addresses";
+  }
+
+  if (operationType !== "read-only") {
+    args.authorizationKey = "admin-key-if-configured";
+  }
+
+  return JSON.stringify({ name, arguments: args }, null, 2);
+}
+
+function relatedToolsFor(name) {
+  if (name === "xbow_request") {
+    return {
+      prerequisites: ["xbow_get_meta_openapi", "xbow_set_default_api_token"],
+      followUps: ["xbow_get_meta_addresses", "xbow_get_meta_webhook_signing_keys"],
+    };
+  }
+
+  if (name.startsWith("xbow_set_") || name.startsWith("xbow_clear_")) {
+    return {
+      prerequisites: ["xbow_set_default_api_token"],
+      followUps: ["xbow_get_asset", "xbow_request"],
+    };
+  }
+
+  if (name.startsWith("xbow_list_")) {
+    return {
+      prerequisites: ["xbow_get_meta_openapi"],
+      followUps: ["xbow_request"],
+    };
+  }
+
+  return {
+    prerequisites: ["xbow_set_default_api_token"],
+    followUps: ["xbow_request"],
+  };
+}
+
+function buildToolDescription(name, summary, schema) {
+  const operationType = operationTypeForTool(name);
+  const required = Array.isArray(schema?.required) ? schema.required : [];
+  const properties = schema?.properties ?? {};
+  const propertyNames = Object.keys(properties);
+  const parameterLines = propertyNames.length > 0
+    ? propertyNames.map((propertyName) => `- ${buildConstraintText(propertyName, properties[propertyName], required)}`).join("\n")
+    : "- No tool-specific parameters.";
+
+  const sharedParameterLines = [
+    "- apiToken: optional; type=string; per-request token override.",
+    "- userId: optional; type=string; selects stored per-user token.",
+    "- authorizationKey: optional; type=string; required for mutating or high-risk operations when XBOW_ADMIN_AUTH_KEY is configured.",
+  ].join("\n");
+
+  const permissionLine = operationType === "read-only"
+    ? "No extra admin permission for read paths unless your XBOW API token itself lacks access."
+    : "If XBOW_ADMIN_AUTH_KEY is configured, authorizationKey must be supplied and must match for this operation.";
+
+  const useLine = operationType === "read-only"
+    ? "Use for safe lookups and inventory reads without changing XBOW state."
+    : "Use when you intentionally need to change credentials, findings, webhooks, or endpoint state.";
+
+  const avoidLine = operationType === "read-only"
+    ? "Do not use when you need to create/update/delete data; use a mutating tool or xbow_request with a mutating method."
+    : "Do not use for exploratory reads; prefer read-only tools first to reduce accidental state changes.";
+
+  const responseLine = "Returns MCP text content containing JSON (pretty-printed). On failure, returns isError=true with JSON fields like message and name.";
+  const failureLines = [
+    "- Missing required fields or wrong types (for example empty IDs or invalid limits).",
+    "- authorizationKey missing/invalid when admin protection is enabled.",
+    "- XBOW API permission errors, rate limits (429), upstream 5xx, or malformed path/method.",
+  ].join("\n");
+
+  const safetyLine = operationType === "read-only"
+    ? "Low risk; still verify organizationId/assetId/reportId scope before sharing returned data."
+    : "Potentially destructive or sensitive. Confirm target IDs and payloads before execution; deletes and token changes may not be reversible.";
+
+  const related = relatedToolsFor(name);
+  const prereqText = related.prerequisites.join(", ");
+  const followUpText = related.followUps.join(", ");
+  const example = buildExample(name, schema, operationType);
+
+  return [
+    summary,
+    "",
+    "When to use:",
+    useLine,
+    "",
+    "When not to use:",
+    avoidLine,
+    "",
+    "Operation type:",
+    operationType,
+    "",
+    "Permissions and prerequisites:",
+    "- Requires a valid XBOW API token (default, user-scoped, or per-request apiToken).",
+    `- ${permissionLine}`,
+    "",
+    "Environment-selection behavior:",
+    "- apiToken wins over userId token, and userId token wins over the default XBOW_API_TOKEN.",
+    "- Base URL and API version come from server config (XBOW_API_BASE_URL, XBOW_API_VERSION).",
+    "",
+    "Parameter formats and constraints:",
+    parameterLines,
+    sharedParameterLines,
+    "",
+    "Expected response shape:",
+    responseLine,
+    "",
+    "Common failure conditions:",
+    failureLines,
+    "",
+    "Recommended related tools:",
+    `- Prerequisites: ${prereqText}`,
+    `- Follow-up: ${followUpText}`,
+    "",
+    "Safety warnings:",
+    safetyLine,
+    "",
+    "Valid invocation example:",
+    example,
+  ].join("\n");
+}
+
 function tool(name, description, inputSchema) {
   const schema = inputSchema.type === "object"
     ? {
@@ -15,13 +230,17 @@ function tool(name, description, inputSchema) {
             type: "string",
             description: "Optional user identifier used to select a stored per-user token.",
           },
+          authorizationKey: {
+            type: "string",
+            description: "Optional admin key required for mutating/high-risk tools when XBOW_ADMIN_AUTH_KEY is configured.",
+          },
         },
       }
     : inputSchema;
 
   return {
     name,
-    description,
+    description: buildToolDescription(name, description, schema),
     inputSchema: schema,
   };
 }
@@ -51,9 +270,8 @@ function ensureAuthorized(client, input, toolName) {
 
 function ensureMutationAuthorization(client, input, toolName, method) {
   const normalizedMethod = typeof method === "string" ? method.toUpperCase() : "GET";
-  const mutatingMethods = new Set(["POST", "PATCH", "PUT", "DELETE"]);
 
-  if (mutatingMethods.has(normalizedMethod)) {
+  if (MUTATING_METHODS.has(normalizedMethod)) {
     ensureAuthorized(client, input, toolName);
   }
 }
