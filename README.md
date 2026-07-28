@@ -92,6 +92,52 @@ Example:
 }
 ```
 
+Prompt examples for MCP clients:
+
+1. Finding triage flow
+
+```json
+{
+  "name": "xbow_query_suggestion_schema_discovery",
+  "arguments": {
+    "goal": "triage findings and set external ticket references",
+    "operationType": "all",
+    "includeSchemas": true,
+    "includeExamples": true,
+    "maxTools": 8
+  }
+}
+```
+
+2. Webhook workflow guidance
+
+```json
+{
+  "name": "xbow_query_suggestion_schema_discovery",
+  "arguments": {
+    "goal": "inspect webhook subscriptions, test delivery, and review delivery history",
+    "operationType": "all",
+    "includeSchemas": true,
+    "includeExamples": true,
+    "maxTools": 10
+  }
+}
+```
+
+3. Schema-only discovery for safe reads
+
+```json
+{
+  "name": "xbow_query_suggestion_schema_discovery",
+  "arguments": {
+    "goal": "discover read-only organization and asset tools",
+    "operationType": "read-only",
+    "includeSchemas": true,
+    "includeExamples": false
+  }
+}
+```
+
 ## Example usage
 
 The server is meant to run over stdio for MCP clients such as VS Code, Claude Desktop, and other MCP-aware tools.
