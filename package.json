@@ -2,6 +2,7 @@
   "name": "xbow-mcp",
   "version": "0.1.0",
   "description": "Model Context Protocol server for the XBOW API.",
+  "license": "MIT",
   "type": "module",
   "main": "src/index.js",
   "scripts": {

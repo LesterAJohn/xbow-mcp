@@ -9,6 +9,7 @@ This server wraps the public XBOW REST API at `https://console.xbow.com/api/v1/`
 The current tool set focuses on the most useful XBOW flows:
 
 - Meta lookups such as addresses, the OpenAPI document, and webhook signing keys.
+- Query suggestion and schema discovery to recommend the right MCP tools for a given objective.
 - Core organization, asset, assessment, finding, and report reads.
 - Finding workflow updates for `externalWorkflowState` and `externalTicketReference`.
 - Webhook list, inspect, update, delete, ping, and delivery lookup operations.
@@ -124,6 +125,7 @@ Each MCP tool definition now includes:
 
 ### Read-only tools
 
+- `xbow_query_suggestion_schema_discovery`
 - `xbow_get_meta_addresses`
 - `xbow_get_meta_openapi`
 - `xbow_get_meta_webhook_signing_keys`
@@ -154,6 +156,31 @@ Each MCP tool definition now includes:
 
 - `xbow_request` (read or mutate depending on `method`; mutating methods require admin authorization when `XBOW_ADMIN_AUTH_KEY` is configured)
 
+## Query Suggestion and Schema Discovery
+
+Use `xbow_query_suggestion_schema_discovery` when you want the MCP server itself to recommend tool usage patterns.
+
+Capabilities:
+
+- Returns recommendations for all other tools in the server.
+- Includes operation class (`read-only`, `mutating`, `high-risk`) and required fields.
+- Can include normalized schema snapshots and valid example invocations.
+- Supports filtering by operation type and ranking by goal keywords.
+
+Example:
+
+```json
+{
+  "name": "xbow_query_suggestion_schema_discovery",
+  "arguments": {
+    "goal": "triage findings and update workflow state",
+    "operationType": "all",
+    "includeSchemas": true,
+    "includeExamples": true
+  }
+}
+```
+
 ## Testing
 
 Run the test suite with:
@@ -169,3 +196,8 @@ The tests validate:
 - The finding workflow update path for `PATCH /api/v1/findings/{findingId}`.
 - The XBOW-specific tool catalog.
 - Authorization enforcement for mutating tools and generic mutating request methods.
+- Query suggestion/schema discovery recommendations and operation-type filtering.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

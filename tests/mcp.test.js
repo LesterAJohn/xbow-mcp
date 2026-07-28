@@ -8,6 +8,59 @@ test("xbow tool catalog includes XBOW-specific endpoints", () => {
   assert.ok(toolNames.includes("xbow_request"));
   assert.ok(toolNames.includes("xbow_get_meta_webhook_signing_keys"));
   assert.ok(toolNames.includes("xbow_update_finding_workflow"));
+  assert.ok(toolNames.includes("xbow_query_suggestion_schema_discovery"));
+});
+
+test("query suggestion tool returns schema-aware recommendations for other tools", async () => {
+  const client = createXbowClient({
+    apiToken: "token-123",
+    fetchImpl: async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+    sleep: async () => {},
+  });
+
+  const content = await invokeTool(client, "xbow_query_suggestion_schema_discovery", {
+    goal: "triage findings",
+    includeSchemas: true,
+    includeExamples: true,
+  });
+
+  const payload = JSON.parse(content[0].text);
+  assert.equal(payload.purpose, "Recommend which XBOW MCP tools to call and expose their input schemas.");
+  assert.ok(Array.isArray(payload.recommendations));
+  assert.ok(payload.recommendations.length > 0);
+  assert.ok(payload.recommendations.every((entry) => entry.tool !== "xbow_query_suggestion_schema_discovery"));
+
+  const findingRecommendation = payload.recommendations.find((entry) => entry.tool === "xbow_update_finding_workflow");
+  assert.ok(findingRecommendation);
+  assert.ok(Array.isArray(findingRecommendation.requiredFields));
+  assert.ok(Array.isArray(findingRecommendation.schema.fields));
+  assert.equal(findingRecommendation.example.name, "xbow_update_finding_workflow");
+});
+
+test("query suggestion tool can filter by operation type", async () => {
+  const client = createXbowClient({
+    apiToken: "token-123",
+    fetchImpl: async () => new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }),
+    sleep: async () => {},
+  });
+
+  const content = await invokeTool(client, "xbow_query_suggestion_schema_discovery", {
+    operationType: "mutating",
+    includeSchemas: false,
+    includeExamples: false,
+  });
+
+  const payload = JSON.parse(content[0].text);
+  assert.ok(payload.recommendations.length > 0);
+  assert.ok(payload.recommendations.every((entry) => entry.operationType === "mutating"));
+  assert.ok(payload.recommendations.every((entry) => entry.schema === undefined));
+  assert.ok(payload.recommendations.every((entry) => entry.example === undefined));
 });
 
 test("finding workflow tool patches the XBOW finding endpoint", async () => {

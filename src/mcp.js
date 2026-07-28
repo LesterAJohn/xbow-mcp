@@ -131,6 +131,138 @@ function relatedToolsFor(name) {
   };
 }
 
+function schemaFieldSnapshot(name, schema, requiredNames) {
+  return {
+    name,
+    required: requiredNames.includes(name),
+    type: typeToText(schema),
+    description: typeof schema?.description === "string" ? schema.description : undefined,
+    minimum: typeof schema?.minimum === "number" ? schema.minimum : undefined,
+    maximum: typeof schema?.maximum === "number" ? schema.maximum : undefined,
+  };
+}
+
+function schemaSnapshot(schema) {
+  const required = Array.isArray(schema?.required) ? schema.required : [];
+  const properties = schema?.properties ?? {};
+
+  return {
+    required,
+    fields: Object.keys(properties).map((fieldName) => schemaFieldSnapshot(fieldName, properties[fieldName], required)),
+  };
+}
+
+function scoreToolForGoal(name, goal) {
+  if (!goal || typeof goal !== "string") {
+    return 0;
+  }
+
+  const normalizedGoal = goal.toLowerCase();
+  const checks = [
+    { tokens: ["discover", "openapi", "schema"], names: ["xbow_get_meta_openapi", "xbow_get_meta_addresses", "xbow_request"] },
+    { tokens: ["asset", "inventory"], names: ["xbow_list_organization_assets", "xbow_get_asset", "xbow_list_asset_findings"] },
+    { tokens: ["finding", "triage", "ticket", "workflow"], names: ["xbow_list_asset_findings", "xbow_get_finding", "xbow_update_finding_workflow"] },
+    { tokens: ["assessment"], names: ["xbow_list_asset_assessments", "xbow_get_assessment"] },
+    { tokens: ["report", "summary"], names: ["xbow_list_asset_reports", "xbow_get_report", "xbow_get_report_summary"] },
+    { tokens: ["webhook", "delivery", "signing", "verify"], names: ["xbow_get_meta_webhook_signing_keys", "xbow_list_organization_webhooks", "xbow_get_webhook", "xbow_list_webhook_deliveries", "xbow_update_webhook", "xbow_delete_webhook", "xbow_ping_webhook"] },
+    { tokens: ["token", "credential", "auth", "authorization", "multi-user"], names: ["xbow_set_default_api_token", "xbow_set_user_api_token", "xbow_clear_user_api_token"] },
+  ];
+
+  for (const check of checks) {
+    if (check.tokens.some((token) => normalizedGoal.includes(token)) && check.names.includes(name)) {
+      return 100;
+    }
+  }
+
+  if (name === "xbow_request") {
+    return 15;
+  }
+
+  return 1;
+}
+
+function buildQuerySuggestionSchemaDiscovery(input = {}) {
+  const requestedType = typeof input.operationType === "string" ? input.operationType.toLowerCase() : "all";
+  const includeSchemas = input.includeSchemas !== false;
+  const includeExamples = input.includeExamples !== false;
+  const maxTools = typeof input.maxTools === "number" ? Math.max(1, Math.floor(input.maxTools)) : undefined;
+  const goal = typeof input.goal === "string" && input.goal.trim() !== "" ? input.goal.trim() : undefined;
+
+  const allOtherTools = toolDefinitions.filter((entry) => entry.name !== "xbow_query_suggestion_schema_discovery");
+  const filteredTools = allOtherTools.filter((entry) => requestedType === "all" || operationTypeForTool(entry.name) === requestedType);
+  const sortedTools = filteredTools
+    .map((entry) => ({
+      entry,
+      score: scoreToolForGoal(entry.name, goal),
+    }))
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      return left.entry.name.localeCompare(right.entry.name);
+    })
+    .map((item) => item.entry);
+
+  const selectedTools = typeof maxTools === "number" ? sortedTools.slice(0, maxTools) : sortedTools;
+
+  const recommendations = selectedTools.map((entry) => {
+    const operationType = operationTypeForTool(entry.name);
+    const summary = String(entry.description).split("\n")[0];
+    const required = Array.isArray(entry.inputSchema?.required) ? entry.inputSchema.required : [];
+    const properties = entry.inputSchema?.properties ?? {};
+    const args = {};
+
+    for (const requiredName of required) {
+      args[requiredName] = sampleValueForSchema(requiredName, properties[requiredName]);
+    }
+
+    if (entry.name === "xbow_request") {
+      args.method = "GET";
+      args.path = "/meta/addresses";
+    }
+
+    return {
+      tool: entry.name,
+      operationType,
+      summary,
+      whenToUse: operationType === "read-only"
+        ? "Use this for reads and discovery with no XBOW state changes."
+        : "Use this only when you intend to change XBOW-side state.",
+      requiresAuthorizationKeyWhenAdminConfigured: operationType !== "read-only",
+      requiredFields: required,
+      schema: includeSchemas ? schemaSnapshot(entry.inputSchema) : undefined,
+      example: includeExamples ? { name: entry.name, arguments: args } : undefined,
+    };
+  });
+
+  return {
+    purpose: "Recommend which XBOW MCP tools to call and expose their input schemas.",
+    goal,
+    operationTypeFilter: requestedType,
+    recommendationCount: recommendations.length,
+    recommendations,
+    suggestedPlaybooks: [
+      {
+        name: "Read-only discovery",
+        sequence: ["xbow_get_meta_openapi", "xbow_get_meta_addresses", "xbow_list_organization_assets", "xbow_get_asset"],
+      },
+      {
+        name: "Finding triage workflow",
+        sequence: ["xbow_list_asset_findings", "xbow_get_finding", "xbow_update_finding_workflow"],
+      },
+      {
+        name: "Webhook operations",
+        sequence: ["xbow_list_organization_webhooks", "xbow_get_webhook", "xbow_ping_webhook", "xbow_list_webhook_deliveries"],
+      },
+      {
+        name: "Fallback endpoint access",
+        sequence: ["xbow_get_meta_openapi", "xbow_request"],
+      },
+    ],
+  };
+}
+
 function buildToolDescription(name, summary, schema) {
   const operationType = operationTypeForTool(name);
   const required = Array.isArray(schema?.required) ? schema.required : [];
@@ -277,6 +409,38 @@ function ensureMutationAuthorization(client, input, toolName, method) {
 }
 
 export const toolDefinitions = [
+  tool(
+    "xbow_query_suggestion_schema_discovery",
+    "Recommend the best XBOW MCP tools for a goal and return schema-aware usage guidance across the full tool catalog.",
+    {
+      type: "object",
+      properties: {
+        goal: {
+          type: "string",
+          description: "Optional user intent, such as 'triage findings' or 'list webhooks'.",
+        },
+        operationType: {
+          type: "string",
+          description: "Optional filter: all, read-only, mutating, or high-risk.",
+        },
+        includeSchemas: {
+          type: "boolean",
+          description: "When true (default), include normalized field-level schema snapshots.",
+        },
+        includeExamples: {
+          type: "boolean",
+          description: "When true (default), include one valid example invocation per recommendation.",
+        },
+        maxTools: {
+          type: "integer",
+          minimum: 1,
+          maximum: 200,
+          description: "Optional cap on the number of recommended tools returned.",
+        },
+      },
+      additionalProperties: false,
+    },
+  ),
   tool(
     "xbow_set_default_api_token",
     "Update the default XBOW token used for requests that do not specify a user-specific override.",
@@ -578,6 +742,8 @@ export async function invokeTool(client, name, input = {}) {
   };
 
   switch (name) {
+    case "xbow_query_suggestion_schema_discovery":
+      return jsonContent(buildQuerySuggestionSchemaDiscovery(input));
     case "xbow_set_default_api_token": {
       ensureAuthorized(client, input, "xbow_set_default_api_token");
       const apiToken = ensureString(input.apiToken, "apiToken");
